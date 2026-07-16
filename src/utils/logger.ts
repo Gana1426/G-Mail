@@ -31,7 +31,7 @@ export const logger = winston.createLogger({
   ],
 });
 
-if (process.env.NODE_ENV === "production") {
+if (!process.env.VERCEL) {
   logger.add(
     new winston.transports.File({
       filename: path.join(logDir, "error.log"),

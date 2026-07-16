@@ -1,0 +1,783 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ORG_ADMIN
+  MAIL_USER
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING
+  DELETED
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING
+  DELETED
+}
+
+enum DomainStatus {
+  PENDING
+  VERIFYING
+  VERIFIED
+  FAILED
+  SUSPENDED
+}
+
+enum DnsRecordStatus {
+  VALID
+  INVALID
+  PENDING
+  MISSING
+}
+
+enum DnsRecordType {
+  MX
+  A
+  TXT
+  CNAME
+}
+
+enum MailboxStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING
+  DELETED
+}
+
+enum MailQueueStatus {
+  PENDING
+  ACTIVE
+  DEFERRED
+  FAILED
+  SENT
+  BOUNCED
+}
+
+enum MailQueueDirection {
+  INCOMING
+  OUTGOING
+}
+
+enum SpamAction {
+  ACCEPT
+  REJECT
+  QUARANTINE
+  MARK
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  SUSPEND
+  ACTIVATE
+  VERIFY
+  RESET_PASSWORD
+  CHANGE_PASSWORD
+  ENABLE_2FA
+  DISABLE_2FA
+  EXPORT
+  IMPORT
+}
+
+enum NotificationType {
+  INFO
+  WARNING
+  ERROR
+  SUCCESS
+  SECURITY
+}
+
+enum SessionStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+enum ForwarderType {
+  INTERNAL
+  EXTERNAL
+}
+
+enum PlanStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum PlanTier {
+  FREE
+  PRO
+  BUSINESS
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  NONE
+  PENDING_PAYMENT
+  ACTIVE
+}
+
+enum PaymentStatus {
+  CREATED
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  REFUNDED
+}
+
+enum BillingInterval {
+  MONTHLY
+  YEARLY
+}
+
+model User {
+  id                String     @id @default(cuid())
+  email             String     @unique
+  passwordHash      String
+  firstName         String
+  lastName          String
+  avatar            String?
+  role              UserRole   @default(MAIL_USER)
+  status            UserStatus @default(PENDING)
+  emailVerified     Boolean    @default(false)
+  emailVerifiedAt   DateTime?
+  twoFactorEnabled  Boolean    @default(false)
+  twoFactorSecret   String?
+  organizationId    String?
+  organization      Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  ownedOrganizations Organization[] @relation("OrganizationOwner")
+  mailbox           Mailbox?
+  sessions          Session[]
+  apiKeys           ApiKey[]
+  auditLogs         AuditLog[]
+  notifications     Notification[]
+  passwordResetTokens PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  lastLoginAt       DateTime?
+
+  @@index([organizationId])
+  @@index([role])
+  @@index([status])
+  @@map("users")
+}
+
+model Organization {
+  id              String             @id @default(cuid())
+  name            String
+  slug            String             @unique
+  description     String?
+  status          OrganizationStatus @default(PENDING)
+  planId          String?
+  plan            Plan?              @relation(fields: [planId], references: [id], onDelete: SetNull)
+  ownerId         String?
+  owner           User?              @relation("OrganizationOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  storageQuota    BigInt             @default(10737418240) // 10GB default
+  storageUsed     BigInt             @default(0)
+  maxDomains      Int                @default(5)
+  maxMailboxes    Int                @default(50)
+  maxMailboxesPerDomain Int?
+  contactEmail    String?
+  contactPhone    String?
+  address         String?
+  logo            String?
+  settings        Json               @default("{}")
+  users           User[]
+  domains         Domain[]
+  mailboxes       Mailbox[]
+  aliases         Alias[]
+  forwarders      Forwarder[]
+  groups          Group[]
+  storageRecords  Storage[]
+  auditLogs       AuditLog[]
+  notifications   Notification[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  suspendedAt     DateTime?
+  suspendedReason String?
+  subscriptionStatus SubscriptionStatus @default(NONE)
+  planActivatedAt    DateTime?
+  razorpayCustomerId String?
+  payments           Payment[]
+
+  @@index([status])
+  @@index([slug])
+  @@index([planId])
+  @@map("organizations")
+}
+
+model Plan {
+  id                    String     @id @default(cuid())
+  code                  String     @unique
+  name                  String
+  tier                  PlanTier
+  description           String?
+  maxDomains            Int        @default(1)
+  maxMailboxes          Int        @default(2)
+  maxMailboxesPerDomain Int?
+  storageQuotaBytes     BigInt     @default(1073741824)
+  aliasesEnabled        Boolean    @default(false)
+  forwardersEnabled     Boolean    @default(false)
+  spamProtection        Boolean    @default(true)
+  prioritySupport       Boolean    @default(false)
+  status                PlanStatus @default(ACTIVE)
+  monthlyPrice          Float      @default(0)
+  yearlyPrice           Float      @default(0)
+  currency              String     @default("INR")
+  businessOption        String?
+  organizations         Organization[]
+  payments              Payment[]
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  @@index([tier])
+  @@index([status])
+  @@map("plans")
+}
+
+model Payment {
+  id                String          @id @default(cuid())
+  organizationId    String
+  organization      Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  planId            String
+  plan              Plan            @relation(fields: [planId], references: [id], onDelete: Restrict)
+  amount            Float
+  currency          String          @default("INR")
+  interval          BillingInterval @default(MONTHLY)
+  status            PaymentStatus   @default(CREATED)
+  razorpayOrderId   String?         @unique
+  razorpayPaymentId String?         @unique
+  razorpaySignature String?
+  paidAt            DateTime?
+  metadata          Json            @default("{}")
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([organizationId])
+  @@index([planId])
+  @@index([status])
+  @@map("payments")
+}
+
+model Domain {
+  id              String          @id @default(cuid())
+  name            String          @unique
+  organizationId  String
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  status          DomainStatus    @default(PENDING)
+  isDefault       Boolean         @default(false)
+  verificationToken String?
+  verifiedAt      DateTime?
+  lastVerifiedAt  DateTime?
+  dnsGeneratedAt  DateTime?
+  dkimSelector    String          @default("mail")
+  dkimPrivateKey  String?         @db.Text
+  dkimPublicKey   String?         @db.Text
+  dkimRotatedAt   DateTime?
+  spfRecord       String?
+  dmarcRecord     String?
+  mxRecord        String?
+  spfStatus       DnsRecordStatus @default(PENDING)
+  dkimStatus      DnsRecordStatus @default(PENDING)
+  dmarcStatus     DnsRecordStatus @default(PENDING)
+  mxStatus        DnsRecordStatus @default(PENDING)
+  aRecordStatus       DnsRecordStatus @default(PENDING)
+  autodiscoverStatus  DnsRecordStatus @default(PENDING)
+  autoconfigStatus    DnsRecordStatus @default(PENDING)
+  dnsRecords      DnsRecord[]
+  verifications   DomainVerification[]
+  catchAllEnabled Boolean         @default(false)
+  catchAllMailboxId String?
+  catchAllMailbox Mailbox?        @relation("CatchAllDomain", fields: [catchAllMailboxId], references: [id], onDelete: SetNull)
+  mailboxes       Mailbox[]
+  aliases         Alias[]
+  forwarders      Forwarder[]
+  dkimKeys        DkimKey[]
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([organizationId])
+  @@index([status])
+  @@map("domains")
+}
+
+model Mailbox {
+  id                String        @id @default(cuid())
+  email             String        @unique
+  localPart         String
+  firstName         String?
+  lastName          String?
+  passwordHash      String
+  displayName       String?
+  organizationId    String
+  organization      Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  domainId          String
+  domain            Domain        @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  userId            String?       @unique
+  user              User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  status            MailboxStatus @default(ACTIVE)
+  quotaBytes        BigInt        @default(5368709120) // 5GB default
+  usedBytes         BigInt        @default(0)
+  maildirPath       String?
+  passwordChangedAt DateTime?
+  vacationEnabled   Boolean       @default(false)
+  vacationSubject   String?
+  vacationMessage   String?       @db.Text
+  vacationStartDate DateTime?
+  vacationEndDate   DateTime?
+  spamScore         Float         @default(5.0)
+  spamWhitelist     String[]      @default([])
+  spamBlacklist     String[]      @default([])
+  aliases           Alias[]
+  forwarders        Forwarder[]   @relation("ForwarderSource")
+  forwarderTargets  Forwarder[]   @relation("ForwarderTarget")
+  catchAllDomains   Domain[]      @relation("CatchAllDomain")
+  mailLogs          MailLog[]
+  spamLogs          SpamLog[]
+  storageRecords    Storage[]
+  groupMembers      GroupMember[]
+  lastLoginAt       DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  suspendedAt       DateTime?
+  suspendedReason   String?
+  mailSessions      MailSession[]
+  mailContacts      MailContact[]
+  mailContactGroups MailContactGroup[]
+  mailSignatures    MailSignature[]
+  mailPreference    MailPreference?
+
+  @@unique([localPart, domainId])
+  @@index([organizationId])
+  @@index([domainId])
+  @@index([status])
+  @@map("mailboxes")
+}
+
+model Alias {
+  id             String       @id @default(cuid())
+  address        String       @unique
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  domainId       String
+  domain         Domain       @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  mailboxId      String?
+  mailbox        Mailbox?     @relation(fields: [mailboxId], references: [id], onDelete: SetNull)
+  recipients     String[]
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
+  @@index([domainId])
+  @@map("aliases")
+}
+
+model Forwarder {
+  id             String        @id @default(cuid())
+  sourceEmail    String
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  domainId       String
+  domain         Domain        @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  sourceMailboxId String?
+  sourceMailbox  Mailbox?      @relation("ForwarderSource", fields: [sourceMailboxId], references: [id], onDelete: SetNull)
+  targetMailboxId String?
+  targetMailbox  Mailbox?      @relation("ForwarderTarget", fields: [targetMailboxId], references: [id], onDelete: SetNull)
+  targetEmail    String?
+  type           ForwarderType @default(INTERNAL)
+  keepCopy       Boolean       @default(false)
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([organizationId])
+  @@index([sourceEmail])
+  @@map("forwarders")
+}
+
+model Group {
+  id             String        @id @default(cuid())
+  name           String
+  email          String        @unique
+  description    String?
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members        GroupMember[]
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([organizationId])
+  @@map("groups")
+}
+
+model GroupMember {
+  id        String   @id @default(cuid())
+  groupId   String
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  mailboxId String
+  mailbox   Mailbox  @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([groupId, mailboxId])
+  @@map("group_members")
+}
+
+model MailLog {
+  id          String   @id @default(cuid())
+  mailboxId   String?
+  mailbox     Mailbox? @relation(fields: [mailboxId], references: [id], onDelete: SetNull)
+  messageId   String?
+  from        String
+  to          String[]
+  subject     String?
+  direction   MailQueueDirection
+  status      String
+  sizeBytes   Int      @default(0)
+  ipAddress   String?
+  userAgent   String?
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now())
+
+  @@index([mailboxId])
+  @@index([createdAt])
+  @@index([direction])
+  @@map("mail_logs")
+}
+
+model MailQueue {
+  id          String             @id @default(cuid())
+  messageId   String             @unique
+  from        String
+  to          String[]
+  subject     String?
+  direction   MailQueueDirection
+  status      MailQueueStatus    @default(PENDING)
+  sizeBytes   Int                @default(0)
+  attempts    Int                @default(0)
+  maxAttempts Int                @default(5)
+  lastError   String?
+  nextRetryAt DateTime?
+  sentAt      DateTime?
+  metadata    Json               @default("{}")
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@index([status])
+  @@index([direction])
+  @@index([nextRetryAt])
+  @@map("mail_queue")
+}
+
+model SpamLog {
+  id          String     @id @default(cuid())
+  mailboxId   String?
+  mailbox     Mailbox?   @relation(fields: [mailboxId], references: [id], onDelete: SetNull)
+  from        String
+  to          String
+  subject     String?
+  score       Float
+  action      SpamAction
+  symbols     String[]   @default([])
+  isQuarantined Boolean  @default(false)
+  releasedAt  DateTime?
+  metadata    Json       @default("{}")
+  createdAt   DateTime   @default(now())
+
+  @@index([mailboxId])
+  @@index([createdAt])
+  @@index([action])
+  @@map("spam_logs")
+}
+
+model Storage {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  mailboxId      String?
+  mailbox        Mailbox?     @relation(fields: [mailboxId], references: [id], onDelete: SetNull)
+  quotaBytes     BigInt
+  usedBytes      BigInt       @default(0)
+  recordedAt     DateTime     @default(now())
+
+  @@index([organizationId])
+  @@index([mailboxId])
+  @@index([recordedAt])
+  @@map("storage")
+}
+
+model AuditLog {
+  id             String      @id @default(cuid())
+  userId         String?
+  user           User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  action         AuditAction
+  resource       String
+  resourceId     String?
+  description    String?
+  ipAddress      String?
+  userAgent      String?
+  metadata       Json        @default("{}")
+  createdAt      DateTime    @default(now())
+
+  @@index([userId])
+  @@index([organizationId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model Session {
+  id           String        @id @default(cuid())
+  userId       String
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshToken String        @unique
+  status       SessionStatus @default(ACTIVE)
+  ipAddress    String?
+  userAgent    String?
+  deviceInfo   String?
+  expiresAt    DateTime
+  lastActiveAt DateTime      @default(now())
+  createdAt    DateTime      @default(now())
+
+  @@index([userId])
+  @@index([refreshToken])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model Notification {
+  id             String           @id @default(cuid())
+  userId         String?
+  user           User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String?
+  organization   Organization?    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  type           NotificationType @default(INFO)
+  title          String
+  message        String
+  isRead         Boolean          @default(false)
+  link           String?
+  metadata       Json             @default("{}")
+  createdAt      DateTime         @default(now())
+
+  @@index([userId])
+  @@index([organizationId])
+  @@index([isRead])
+  @@map("notifications")
+}
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  category  String   @default("general")
+  isPublic  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([category])
+  @@map("settings")
+}
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  keyHash     String    @unique
+  prefix      String
+  permissions String[]  @default([])
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  @@index([userId])
+  @@index([keyHash])
+  @@map("api_keys")
+}
+
+model DnsRecord {
+  id        String          @id @default(cuid())
+  domainId  String
+  domain    Domain          @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  type      DnsRecordType
+  host      String
+  value     String          @db.Text
+  priority  Int?
+  ttl       Int             @default(3600)
+  status    DnsRecordStatus @default(PENDING)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@index([domainId])
+  @@index([type])
+  @@map("dns_records")
+}
+
+model DomainVerification {
+  id        String       @id @default(cuid())
+  domainId  String
+  domain    Domain       @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  status    DomainStatus @default(PENDING)
+  results   Json         @default("{}")
+  checkedAt DateTime     @default(now())
+
+  @@index([domainId])
+  @@index([checkedAt])
+  @@map("domain_verifications")
+}
+
+model DkimKey {
+  id         String   @id @default(cuid())
+  domainId   String
+  domain     Domain   @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  selector   String
+  privateKey String   @db.Text
+  publicKey  String   @db.Text
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  rotatedAt  DateTime?
+
+  @@unique([domainId, selector])
+  @@index([domainId])
+  @@map("dkim_keys")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([token])
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model EmailVerificationToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([token])
+  @@index([userId])
+  @@map("email_verification_tokens")
+}
+
+model MailSession {
+  id              String        @id @default(cuid())
+  mailboxId       String
+  mailbox         Mailbox       @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  tokenHash       String        @unique
+  encryptedSecret String        @db.Text
+  ipAddress       String?
+  userAgent       String?
+  deviceInfo      String?
+  expiresAt       DateTime
+  lastActiveAt    DateTime      @default(now())
+  createdAt       DateTime      @default(now())
+
+  @@index([mailboxId])
+  @@index([tokenHash])
+  @@index([expiresAt])
+  @@map("mail_sessions")
+}
+
+model MailContact {
+  id        String   @id @default(cuid())
+  mailboxId String
+  mailbox   Mailbox  @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  groupId   String?
+  group     MailContactGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  email     String
+  name      String
+  phone     String?
+  company   String?
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([mailboxId])
+  @@index([email])
+  @@map("mail_contacts")
+}
+
+model MailContactGroup {
+  id          String        @id @default(cuid())
+  mailboxId   String
+  mailbox     Mailbox       @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  contacts    MailContact[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([mailboxId])
+  @@map("mail_contact_groups")
+}
+
+model MailSignature {
+  id        String   @id @default(cuid())
+  mailboxId String
+  mailbox   Mailbox  @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  name      String
+  content   String   @db.Text
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([mailboxId])
+  @@map("mail_signatures")
+}
+
+model MailPreference {
+  id                 String   @id @default(cuid())
+  mailboxId          String   @unique
+  mailbox            Mailbox  @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  theme              String   @default("system")
+  language           String   @default("en")
+  timezone           String   @default("UTC")
+  signatureId        String?
+  vacationEnabled    Boolean  @default(false)
+  vacationSubject    String?
+  vacationMessage    String?  @db.Text
+  vacationStartDate  DateTime?
+  vacationEndDate    DateTime?
+  forwardingEnabled  Boolean  @default(false)
+  forwardingAddress  String?
+  keepCopy           Boolean  @default(true)
+  conversationView   Boolean  @default(true)
+  sidebarWidth       Int      @default(260)
+  readingPaneWidth   Int      @default(480)
+  keyboardShortcuts  Json     @default("{}")
+  trashRetentionDays Int      @default(30)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@map("mail_preferences")
+}

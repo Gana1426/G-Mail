@@ -61,6 +61,10 @@ export const config = {
 } as const;
 
 function validateConfig(): void {
+  // Server-only: browser bundles never receive DATABASE_URL / JWT_SECRET / ENCRYPTION_KEY
+  // (non-NEXT_PUBLIC_ vars). Throwing here crashes client pages that import config.
+  if (typeof window !== "undefined") return;
+
   const required = [
     { key: "DATABASE_URL", value: process.env.DATABASE_URL },
     { key: "JWT_SECRET", value: process.env.JWT_SECRET },

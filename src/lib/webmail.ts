@@ -1,4 +1,4 @@
-import { config } from "@/config";
+import { publicConfig } from "@/config/public";
 
 export async function openWebmail(mailboxId?: string): Promise<void> {
   try {
@@ -20,7 +20,7 @@ export async function openWebmail(mailboxId?: string): Promise<void> {
 
   const mailUrl =
     process.env.NEXT_PUBLIC_WEBMAIL_URL ??
-    config.roundcube.url ??
-    `https://${config.mail.hostname}`;
+    publicConfig.webmailUrl ??
+    `https://${publicConfig.mailHostname}`;
   window.open(mailUrl, "_blank", "noopener,noreferrer");
 }

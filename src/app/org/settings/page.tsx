@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
 import { useState, useEffect } from "react";
-import { config } from "@/config";
+import { publicConfig } from "@/config/public";
 
 interface OrgSettings {
   general?: {
@@ -84,10 +84,10 @@ export default function OrgSettingsPage() {
           ...data.settings?.general,
         },
         mail: {
-          smtpHost: config.mail.hostname,
-          smtpPort: config.mail.smtpPort,
-          imapPort: config.mail.imapPort,
-          pop3Port: config.mail.pop3Port,
+          smtpHost: publicConfig.mailHostname,
+          smtpPort: publicConfig.smtpPort,
+          imapPort: publicConfig.imapPort,
+          pop3Port: publicConfig.pop3Port,
           ssl: true,
           tls: true,
           maxMessageSize: 52428800,

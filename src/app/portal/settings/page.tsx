@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { config } from "@/config";
+import { publicConfig } from "@/config/public";
 
 export default function PortalSettingsPage() {
   const { toast } = useToast();
@@ -113,19 +113,19 @@ export default function PortalSettingsPage() {
           <CardContent className="space-y-3 text-sm">
             <div className="flex justify-between">
               <span className="text-muted-foreground">IMAP Host</span>
-              <span className="font-mono">{config.mail.hostname}</span>
+              <span className="font-mono">{publicConfig.mailHostname}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">IMAP Port</span>
-              <span>{config.mail.imapPort}</span>
+              <span>{publicConfig.imapPort}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">SMTP Host</span>
-              <span className="font-mono">{config.mail.hostname}</span>
+              <span className="font-mono">{publicConfig.mailHostname}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">SMTP Port</span>
-              <span>{config.mail.smtpPort}</span>
+              <span>{publicConfig.smtpPort}</span>
             </div>
           </CardContent>
         </Card>

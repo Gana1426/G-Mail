@@ -1,4 +1,3 @@
-import "server-only";
 export const config = {
   app: {
     name: process.env.APP_NAME ?? "MailHost Platform",

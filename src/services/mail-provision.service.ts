@@ -19,6 +19,18 @@ const execAsync = promisify(exec);
  * Default path: /home/vmail/{domain}/{localPart}/
  */
 export class MailProvisionService {
+  /**
+   * Filesystem provisioning only works where the app has a writable disk
+   * (local dev, VPS). Serverless hosts like Vercel have a read-only
+   * filesystem, so we skip fs writes there and keep mailbox metadata in
+   * the database only. Override with MAIL_FS_PROVISION_ENABLED=true/false.
+   */
+  private isFsProvisionEnabled(): boolean {
+    if (process.env.MAIL_FS_PROVISION_ENABLED === "false") return false;
+    if (process.env.MAIL_FS_PROVISION_ENABLED === "true") return true;
+    return !process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME;
+  }
+
   private getMailBasePath(): string {
     if (process.env.MAIL_DATA_PATH) {
       return process.env.MAIL_DATA_PATH;
@@ -44,18 +56,37 @@ export class MailProvisionService {
     quotaBytes?: bigint;
   }): Promise<string> {
     const maildirPath = this.getMaildirPath(params.domain, params.localPart);
-    await this.createMaildir(maildirPath);
-    await this.writeDovecotAuthEntry(
-      params.email,
-      maildirPath,
-      params.passwordHash
-    );
-    await this.writePostfixMailboxEntry(params.email, maildirPath);
-    await this.reloadMailServices();
+
+    if (!this.isFsProvisionEnabled()) {
+      logAuth("mail_provision_fs_skipped", params.email, true);
+      return maildirPath;
+    }
+
+    try {
+      await this.createMaildir(maildirPath);
+      await this.writeDovecotAuthEntry(
+        params.email,
+        maildirPath,
+        params.passwordHash
+      );
+      await this.writePostfixMailboxEntry(params.email, maildirPath);
+      await this.reloadMailServices();
+    } catch (error) {
+      // Read-only or restricted filesystem: keep DB as source of truth and
+      // let the mail server sync provisioning separately.
+      console.error(
+        `[MailProvision] Filesystem provisioning failed for ${params.email}:`,
+        error instanceof Error ? error.message : error
+      );
+      logAuth("mail_provision_fs_failed", params.email, false);
+    }
+
     return maildirPath;
   }
 
   async deprovisionMailbox(maildirPath: string | null, email?: string): Promise<void> {
+    if (!this.isFsProvisionEnabled()) return;
+
     if (maildirPath) {
       await fs.rm(maildirPath, { recursive: true, force: true }).catch(() => {});
       const domainDir = path.dirname(maildirPath);
@@ -72,9 +103,19 @@ export class MailProvisionService {
   }
 
   async updateMailboxPassword(email: string, passwordHash: string, maildirPath: string): Promise<void> {
-    await this.writeDovecotAuthEntry(email, maildirPath, passwordHash);
-    await this.reloadMailServices();
-    logAuth("mail_provision_password", email, true);
+    if (!this.isFsProvisionEnabled()) return;
+
+    try {
+      await this.writeDovecotAuthEntry(email, maildirPath, passwordHash);
+      await this.reloadMailServices();
+      logAuth("mail_provision_password", email, true);
+    } catch (error) {
+      console.error(
+        `[MailProvision] Password sync failed for ${email}:`,
+        error instanceof Error ? error.message : error
+      );
+      logAuth("mail_provision_password", email, false);
+    }
   }
 
   private async createMaildir(maildirPath: string): Promise<void> {
